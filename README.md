@@ -66,7 +66,7 @@ The default certificate mode is `letsencrypt`, using certbot standalone with the
 
 ## Capacity notes
 
-The proxy path uses multiple accept workers per listener, shared DNS resolution cache, shared dialer, goroutine-per-connection I/O, pooled copy buffers, and no TLS termination. The default copy buffer is 8 KiB to keep memory bounded at very high connection counts. Handling 100,000 simultaneous clients is mainly limited by:
+The proxy path uses multiple accept workers per listener, shared DNS resolution cache, shared dialer, goroutine-per-connection I/O, kernel-assisted `io.Copy` when `idle_timeout` is `0s`, pooled copy buffers when application idle deadlines are enabled, and no TLS termination. The default config keeps `idle_timeout` at `0s` for the fastest copy path and relies on TCP keepalive; set it to a non-zero duration if you need strict idle connection expiry. The default copy buffer for deadline mode is 8 KiB to keep memory bounded at very high connection counts. Handling 100,000 simultaneous clients is mainly limited by:
 
 - `ulimit -n` / systemd `LimitNOFILE`
 - kernel listen backlog and TCP memory settings

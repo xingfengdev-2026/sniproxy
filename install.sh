@@ -324,7 +324,7 @@ cfg = {
         "accept_workers": 0,
         "connect_timeout": "10s",
         "handshake_timeout": "5s",
-        "idle_timeout": "2m",
+        "idle_timeout": "0s",
         "resolve_cache_ttl": "60s",
         "max_hello_bytes": 65536,
         "max_connections": 200000,

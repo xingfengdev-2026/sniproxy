@@ -55,7 +55,7 @@ func main() {
 	}
 
 	sni := proxy.New(cfg.SNI, log.Default())
-	if cfg.SNI.Listen != "" {
+	if shouldStartProxy(cfg.SNI) {
 		if err := sni.Start(ctx); err != nil {
 			log.Fatalf("start sni proxy: %v", err)
 		}
@@ -69,4 +69,8 @@ func main() {
 	<-ctx.Done()
 	log.Printf("shutting down")
 	time.Sleep(250 * time.Millisecond)
+}
+
+func shouldStartProxy(cfg config.SNIConfig) bool {
+	return len(cfg.Listeners) > 0
 }

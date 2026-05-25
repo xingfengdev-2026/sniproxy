@@ -232,18 +232,17 @@ func (s *Server) deniedTargetIP(ip net.IP) bool {
 }
 
 func (s *Server) copy(dst, src net.Conn) (int64, error) {
+	if s.cfg.IdleTimeout.Duration <= 0 {
+		return io.Copy(dst, src)
+	}
 	buf := s.buffers.Get().([]byte)
 	defer s.buffers.Put(buf)
 	var total int64
 	for {
-		if s.cfg.IdleTimeout.Duration > 0 {
-			_ = src.SetReadDeadline(time.Now().Add(s.cfg.IdleTimeout.Duration))
-		}
+		_ = src.SetReadDeadline(time.Now().Add(s.cfg.IdleTimeout.Duration))
 		nr, er := src.Read(buf)
 		if nr > 0 {
-			if s.cfg.IdleTimeout.Duration > 0 {
-				_ = dst.SetWriteDeadline(time.Now().Add(s.cfg.IdleTimeout.Duration))
-			}
+			_ = dst.SetWriteDeadline(time.Now().Add(s.cfg.IdleTimeout.Duration))
 			nw, ew := writeFull(dst, buf[:nr])
 			total += int64(nw)
 			if ew != nil {

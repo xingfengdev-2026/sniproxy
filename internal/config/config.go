@@ -130,7 +130,7 @@ func Default() Config {
 			},
 			ConnectTimeout:     Duration{10 * time.Second},
 			HandshakeTimeout:   Duration{5 * time.Second},
-			IdleTimeout:        Duration{2 * time.Minute},
+			IdleTimeout:        Duration{0},
 			ResolveCacheTTL:    Duration{60 * time.Second},
 			MaxHelloBytes:      64 * 1024,
 			MaxConnections:     200000,
