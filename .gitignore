@@ -1,0 +1,7 @@
+dist/
+*.exe
+*.test
+*.out
+*.log
+coverage.txt
+

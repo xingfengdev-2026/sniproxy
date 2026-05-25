@@ -1,0 +1,49 @@
+{
+  "port_cleanup": {
+    "enabled": true,
+    "ports": [53, 853, 80, 443, 8443],
+    "protocols": ["tcp", "udp"],
+    "kill_timeout": "2s",
+    "fail_on_error": true
+  },
+  "sni": {
+    "listen": ":443",
+    "target_port": 443,
+    "connect_timeout": "10s",
+    "handshake_timeout": "5s",
+    "idle_timeout": "2m",
+    "resolve_cache_ttl": "60s",
+    "max_hello_bytes": 65536,
+    "max_connections": 200000,
+    "allow_domains": ["*"],
+    "deny_domains": [],
+    "deny_target_ips": [],
+    "deny_private_targets": true,
+    "buffer_size": 8192
+  },
+  "dns": {
+    "udp_listen": ":53",
+    "tcp_listen": ":53",
+    "dot_listen": ":853",
+    "doh_listen": ":8443",
+    "doh_path": "/dns-query",
+    "upstreams": ["1.1.1.1:53", "8.8.8.8:53"],
+    "timeout": "3s",
+    "ttl": 60,
+    "authoritative_domains": ["*"],
+    "a_records": ["203.0.113.10"],
+    "aaaa_records": [],
+    "max_concurrent_queries": 200000,
+    "tls_cert_file": "",
+    "tls_key_file": "",
+    "tls_server_names": ["localhost"],
+    "max_udp_size": 4096,
+    "max_dns_message_size": 65535
+  },
+  "metrics": {
+    "listen": "127.0.0.1:9090"
+  },
+  "logging": {
+    "access": false
+  }
+}
