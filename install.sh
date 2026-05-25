@@ -206,6 +206,12 @@ install_certificate() {
       certbot certonly --standalone --non-interactive --agree-tos \
         --preferred-challenges "${SNIPROXY_LE_CHALLENGE:-http}" \
         "${email_args[@]}" -d "$domain" >&2
+      mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+      cat > /etc/letsencrypt/renewal-hooks/deploy/restart-sniproxy.sh <<'EOF'
+#!/usr/bin/env bash
+systemctl restart sniproxy >/dev/null 2>&1 || true
+EOF
+      chmod 755 /etc/letsencrypt/renewal-hooks/deploy/restart-sniproxy.sh
       printf '/etc/letsencrypt/live/%s/fullchain.pem|/etc/letsencrypt/live/%s/privkey.pem' "$domain" "$domain"
       ;;
     selfsigned)
