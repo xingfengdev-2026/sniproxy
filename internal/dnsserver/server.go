@@ -18,7 +18,9 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -39,6 +41,7 @@ type Server struct {
 	roundRobin  atomic.Uint64
 	aRecords    []net.IP
 	aaaaRecords []net.IP
+	udpBuffers  sync.Pool
 }
 
 func New(cfg config.DNSConfig, logger *log.Logger) *Server {
@@ -63,6 +66,9 @@ func New(cfg config.DNSConfig, logger *log.Logger) *Server {
 		sem:         sem,
 		aRecords:    aRecords,
 		aaaaRecords: aaaaRecords,
+		udpBuffers: sync.Pool{New: func() any {
+			return make([]byte, cfg.MaxUDPSize)
+		}},
 	}
 }
 
@@ -101,27 +107,49 @@ func (s *Server) startUDP(ctx context.Context) error {
 		_ = pc.Close()
 	}()
 	go func() {
+		type packet struct {
+			buf  []byte
+			n    int
+			addr net.Addr
+		}
+		workers := runtime.GOMAXPROCS(0) * 4
+		if workers < 4 {
+			workers = 4
+		}
+		jobs := make(chan packet, workers*1024)
+		for i := 0; i < workers; i++ {
+			go func() {
+				for pkt := range jobs {
+					resp := s.handlePacket(ctx, pkt.buf[:pkt.n])
+					if len(resp) > s.cfg.MaxUDPSize {
+						resp = setTruncated(resp)
+						if len(resp) > 512 {
+							resp = resp[:512]
+						}
+					}
+					_, _ = pc.WriteTo(resp, pkt.addr)
+					s.udpBuffers.Put(pkt.buf)
+				}
+			}()
+		}
 		for {
-			buf := make([]byte, s.cfg.MaxUDPSize)
+			buf := s.udpBuffers.Get().([]byte)
 			n, addr, err := pc.ReadFrom(buf)
 			if err != nil {
+				s.udpBuffers.Put(buf)
 				if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
+					close(jobs)
 					return
 				}
 				s.log.Printf("dns udp read: %v", err)
 				continue
 			}
-			packet := append([]byte(nil), buf[:n]...)
-			go func() {
-				resp := s.handlePacket(ctx, packet)
-				if len(resp) > s.cfg.MaxUDPSize {
-					resp = setTruncated(resp)
-					if len(resp) > 512 {
-						resp = resp[:512]
-					}
-				}
-				_, _ = pc.WriteTo(resp, addr)
-			}()
+			select {
+			case jobs <- packet{buf: buf, n: n, addr: addr}:
+			default:
+				s.udpBuffers.Put(buf)
+				dnsQueriesFailed.Add(1)
+			}
 		}
 	}()
 	return nil

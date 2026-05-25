@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -61,19 +62,27 @@ type PortCleanupConfig struct {
 }
 
 type SNIConfig struct {
-	Listen             string   `json:"listen"`
-	TargetPort         int      `json:"target_port"`
-	ConnectTimeout     Duration `json:"connect_timeout"`
-	HandshakeTimeout   Duration `json:"handshake_timeout"`
-	IdleTimeout        Duration `json:"idle_timeout"`
-	ResolveCacheTTL    Duration `json:"resolve_cache_ttl"`
-	MaxHelloBytes      int      `json:"max_hello_bytes"`
-	MaxConnections     int64    `json:"max_connections"`
-	AllowDomains       []string `json:"allow_domains"`
-	DenyDomains        []string `json:"deny_domains"`
-	DenyTargetIPs      []string `json:"deny_target_ips"`
-	DenyPrivateTargets bool     `json:"deny_private_targets"`
-	BufferSize         int      `json:"buffer_size"`
+	Listen             string                `json:"listen"`
+	TargetPort         int                   `json:"target_port"`
+	Listeners          []ProxyListenerConfig `json:"listeners"`
+	AcceptWorkers      int                   `json:"accept_workers"`
+	ConnectTimeout     Duration              `json:"connect_timeout"`
+	HandshakeTimeout   Duration              `json:"handshake_timeout"`
+	IdleTimeout        Duration              `json:"idle_timeout"`
+	ResolveCacheTTL    Duration              `json:"resolve_cache_ttl"`
+	MaxHelloBytes      int                   `json:"max_hello_bytes"`
+	MaxConnections     int64                 `json:"max_connections"`
+	AllowDomains       []string              `json:"allow_domains"`
+	DenyDomains        []string              `json:"deny_domains"`
+	DenyTargetIPs      []string              `json:"deny_target_ips"`
+	DenyPrivateTargets bool                  `json:"deny_private_targets"`
+	BufferSize         int                   `json:"buffer_size"`
+}
+
+type ProxyListenerConfig struct {
+	Listen     string `json:"listen"`
+	Protocol   string `json:"protocol"`
+	TargetPort int    `json:"target_port"`
 }
 
 type DNSConfig struct {
@@ -114,8 +123,11 @@ func Default() Config {
 			FailOnError: true,
 		},
 		SNI: SNIConfig{
-			Listen:             ":443",
-			TargetPort:         443,
+			TargetPort: 443,
+			Listeners: []ProxyListenerConfig{
+				{Listen: ":443", Protocol: "tls", TargetPort: 443},
+				{Listen: ":80", Protocol: "http", TargetPort: 80},
+			},
 			ConnectTimeout:     Duration{10 * time.Second},
 			HandshakeTimeout:   Duration{5 * time.Second},
 			IdleTimeout:        Duration{2 * time.Minute},
@@ -191,6 +203,47 @@ func (c *Config) Normalize() error {
 	}
 	if c.SNI.TargetPort == 0 {
 		c.SNI.TargetPort = 443
+	}
+	if len(c.SNI.Listeners) == 0 {
+		if c.SNI.Listen != "" {
+			c.SNI.Listeners = []ProxyListenerConfig{
+				{Listen: c.SNI.Listen, Protocol: "tls", TargetPort: c.SNI.TargetPort},
+			}
+		} else {
+			c.SNI.Listeners = []ProxyListenerConfig{
+				{Listen: ":443", Protocol: "tls", TargetPort: 443},
+				{Listen: ":80", Protocol: "http", TargetPort: 80},
+			}
+		}
+	}
+	for i := range c.SNI.Listeners {
+		l := &c.SNI.Listeners[i]
+		l.Protocol = strings.ToLower(strings.TrimSpace(l.Protocol))
+		if l.Protocol == "" || l.Protocol == "sni" {
+			l.Protocol = "tls"
+		}
+		if l.Protocol != "tls" && l.Protocol != "http" {
+			return fmt.Errorf("invalid sni.listeners[%d].protocol %q", i, l.Protocol)
+		}
+		if l.Listen == "" {
+			return fmt.Errorf("sni.listeners[%d].listen is required", i)
+		}
+		if l.TargetPort == 0 {
+			if l.Protocol == "http" {
+				l.TargetPort = 80
+			} else {
+				l.TargetPort = 443
+			}
+		}
+		if l.TargetPort < 1 || l.TargetPort > 65535 {
+			return fmt.Errorf("invalid sni.listeners[%d].target_port %d", i, l.TargetPort)
+		}
+	}
+	if c.SNI.AcceptWorkers <= 0 {
+		c.SNI.AcceptWorkers = runtime.GOMAXPROCS(0)
+	}
+	if c.SNI.AcceptWorkers > 128 {
+		c.SNI.AcceptWorkers = 128
 	}
 	if c.SNI.ConnectTimeout.Duration <= 0 {
 		c.SNI.ConnectTimeout = Duration{10 * time.Second}

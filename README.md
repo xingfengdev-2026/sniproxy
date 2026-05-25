@@ -1,6 +1,6 @@
 # sniproxy
 
-High-concurrency TLS SNI passthrough proxy written in Go. It also includes:
+High-concurrency HTTP Host and TLS SNI passthrough proxy written in Go. It also includes:
 
 - DNS over UDP and TCP
 - DNS over TLS
@@ -11,7 +11,7 @@ High-concurrency TLS SNI passthrough proxy written in Go. It also includes:
 
 ## How it works
 
-The TCP proxy reads only the TLS ClientHello, extracts the SNI host name, opens a TCP connection to `<sni>:443`, writes the original ClientHello bytes upstream, then pipes both directions. It does not decrypt TLS.
+The TCP proxy listens on a configurable listener array. The default listeners are `:443` for TLS SNI passthrough and `:80` for plain HTTP Host passthrough. It reads only the first TLS ClientHello or HTTP request header, extracts the target host, opens a TCP connection to the same host on the configured target port, writes the original bytes upstream, then pipes both directions. It does not decrypt TLS or parse HTTP bodies.
 
 Do not run it as an unrestricted open relay. Use `deny_domains` and `deny_target_ips` to prevent self-loops and abuse, especially for the proxy server's own public IP and host name.
 
@@ -66,7 +66,7 @@ The default certificate mode is `letsencrypt`, using certbot standalone with the
 
 ## Capacity notes
 
-The code path is goroutine-per-connection with pooled copy buffers and no TLS termination in the proxy path. The default copy buffer is 8 KiB to keep memory bounded at very high connection counts. Handling 100,000 simultaneous clients is mainly limited by:
+The proxy path uses multiple accept workers per listener, shared DNS resolution cache, shared dialer, goroutine-per-connection I/O, pooled copy buffers, and no TLS termination. The default copy buffer is 8 KiB to keep memory bounded at very high connection counts. Handling 100,000 simultaneous clients is mainly limited by:
 
 - `ulimit -n` / systemd `LimitNOFILE`
 - kernel listen backlog and TCP memory settings
@@ -78,8 +78,10 @@ For Linux, use a high file descriptor limit and tune the kernel before large-sca
 
 ```bash
 sysctl -w net.core.somaxconn=65535
+sysctl -w net.core.netdev_max_backlog=250000
 sysctl -w net.ipv4.ip_local_port_range="10000 65000"
 sysctl -w net.ipv4.tcp_tw_reuse=1
+sysctl -w net.ipv4.tcp_fastopen=3
 ```
 
 The included systemd unit sets `LimitNOFILE=1048576`.

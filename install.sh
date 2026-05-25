@@ -317,8 +317,11 @@ cfg = {
         "fail_on_error": True,
     },
     "sni": {
-        "listen": ":443",
-        "target_port": 443,
+        "listeners": [
+            {"listen": ":443", "protocol": "tls", "target_port": 443},
+            {"listen": ":80", "protocol": "http", "target_port": 80},
+        ],
+        "accept_workers": 0,
         "connect_timeout": "10s",
         "handshake_timeout": "5s",
         "idle_timeout": "2m",
@@ -363,7 +366,11 @@ tune_kernel() {
   cat > /etc/sysctl.d/99-sniproxy.conf <<'EOF'
 fs.file-max = 2097152
 net.core.somaxconn = 65535
+net.core.netdev_max_backlog = 250000
+net.core.rmem_max = 134217728
+net.core.wmem_max = 134217728
 net.ipv4.tcp_max_syn_backlog = 65535
+net.ipv4.tcp_fastopen = 3
 net.ipv4.ip_local_port_range = 10000 65535
 net.ipv4.tcp_tw_reuse = 1
 net.ipv4.tcp_fin_timeout = 15

@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,11 +22,11 @@ import (
 )
 
 var (
-	currentConnections = expvar.NewInt("sni_connections_current")
-	totalConnections   = expvar.NewInt("sni_connections_total")
-	failedConnections  = expvar.NewInt("sni_connections_failed")
-	bytesClientToUp    = expvar.NewInt("sni_bytes_client_to_upstream")
-	bytesUpToClient    = expvar.NewInt("sni_bytes_upstream_to_client")
+	currentConnections = expvar.NewInt("proxy_connections_current")
+	totalConnections   = expvar.NewInt("proxy_connections_total")
+	failedConnections  = expvar.NewInt("proxy_connections_failed")
+	bytesClientToUp    = expvar.NewInt("proxy_bytes_client_to_upstream")
+	bytesUpToClient    = expvar.NewInt("proxy_bytes_upstream_to_client")
 )
 
 type Server struct {
@@ -35,6 +36,7 @@ type Server struct {
 	buffers sync.Pool
 	cache   *ipCache
 	denyIPs []netip.Prefix
+	dialer  net.Dialer
 	active  atomic.Int64
 	started atomic.Bool
 }
@@ -56,30 +58,43 @@ func New(cfg config.SNIConfig, logger *log.Logger) *Server {
 		}},
 		cache:   newIPCache(cfg.ResolveCacheTTL.Duration),
 		denyIPs: parseDenyTargetIPs(cfg.DenyTargetIPs, logger),
+		dialer: net.Dialer{
+			Timeout:       cfg.ConnectTimeout.Duration,
+			KeepAlive:     30 * time.Second,
+			FallbackDelay: 100 * time.Millisecond,
+		},
 	}
 }
 
 func (s *Server) Start(ctx context.Context) error {
-	if s.cfg.Listen == "" {
+	if len(s.cfg.Listeners) == 0 {
 		return nil
 	}
 	if !s.started.CompareAndSwap(false, true) {
 		return nil
 	}
-	ln, err := net.Listen("tcp", s.cfg.Listen)
-	if err != nil {
-		return err
+	workers := s.cfg.AcceptWorkers
+	if workers <= 0 {
+		workers = runtime.GOMAXPROCS(0)
 	}
-	s.log.Printf("sni proxy listening on %s", s.cfg.Listen)
-	go func() {
-		<-ctx.Done()
-		_ = ln.Close()
-	}()
-	go s.acceptLoop(ctx, ln)
+	for _, listener := range s.cfg.Listeners {
+		ln, err := net.Listen("tcp", listener.Listen)
+		if err != nil {
+			return err
+		}
+		s.log.Printf("%s proxy listening on %s -> :%d", listener.Protocol, listener.Listen, listener.TargetPort)
+		go func(ln net.Listener) {
+			<-ctx.Done()
+			_ = ln.Close()
+		}(ln)
+		for i := 0; i < workers; i++ {
+			go s.acceptLoop(ctx, ln, listener)
+		}
+	}
 	return nil
 }
 
-func (s *Server) acceptLoop(ctx context.Context, ln net.Listener) {
+func (s *Server) acceptLoop(ctx context.Context, ln net.Listener, listener config.ProxyListenerConfig) {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -109,31 +124,27 @@ func (s *Server) acceptLoop(ctx context.Context, ln net.Listener) {
 				currentConnections.Add(-1)
 				s.active.Add(-1)
 			}()
-			s.handleConn(ctx, conn)
+			s.handleConn(ctx, conn, listener)
 		}()
 	}
 }
 
-func (s *Server) handleConn(parent context.Context, client net.Conn) {
+func (s *Server) handleConn(parent context.Context, client net.Conn, listener config.ProxyListenerConfig) {
 	defer client.Close()
 	tuneTCP(client)
 
-	hello, firstBytes, err := sni.ReadClientHello(client, s.cfg.MaxHelloBytes, s.cfg.HandshakeTimeout.Duration)
-	if err != nil {
-		failedConnections.Add(1)
-		return
-	}
-	if !acl.Allowed(hello.ServerName, s.cfg.AllowDomains, s.cfg.DenyDomains) {
+	host, firstBytes, err := s.readHost(client, listener)
+	if err != nil || !acl.Allowed(host, s.cfg.AllowDomains, s.cfg.DenyDomains) {
 		failedConnections.Add(1)
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(parent, s.cfg.ConnectTimeout.Duration)
 	defer cancel()
-	upstream, err := s.dialTarget(ctx, hello.ServerName)
+	upstream, err := s.dialTarget(ctx, host, listener.TargetPort)
 	if err != nil {
 		failedConnections.Add(1)
-		s.log.Printf("sni dial %s: %v", hello.ServerName, err)
+		s.log.Printf("%s dial %s:%d: %v", listener.Protocol, host, listener.TargetPort, err)
 		return
 	}
 	defer upstream.Close()
@@ -164,14 +175,23 @@ func (s *Server) handleConn(parent context.Context, client net.Conn) {
 	<-errc
 }
 
-func (s *Server) dialTarget(ctx context.Context, host string) (net.Conn, error) {
-	port := strconv.Itoa(s.cfg.TargetPort)
-	dialer := &net.Dialer{
-		Timeout:   s.cfg.ConnectTimeout.Duration,
-		KeepAlive: 30 * time.Second,
+func (s *Server) readHost(client net.Conn, listener config.ProxyListenerConfig) (string, []byte, error) {
+	switch listener.Protocol {
+	case "http":
+		return readHTTPHost(client, s.cfg.MaxHelloBytes, s.cfg.HandshakeTimeout.Duration)
+	default:
+		hello, firstBytes, err := sni.ReadClientHello(client, s.cfg.MaxHelloBytes, s.cfg.HandshakeTimeout.Duration)
+		if err != nil {
+			return "", firstBytes, err
+		}
+		return hello.ServerName, firstBytes, nil
 	}
+}
+
+func (s *Server) dialTarget(ctx context.Context, host string, targetPort int) (net.Conn, error) {
+	port := strconv.Itoa(targetPort)
 	if !s.cfg.DenyPrivateTargets {
-		return dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, port))
+		return s.dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, port))
 	}
 	ips, err := s.cache.lookup(ctx, host)
 	if err != nil {
@@ -183,7 +203,7 @@ func (s *Server) dialTarget(ctx context.Context, host string) (net.Conn, error) 
 			last = fmt.Errorf("target %s resolved to blocked address %s", host, ip.IP)
 			continue
 		}
-		conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(ip.IP.String(), port))
+		conn, err := s.dialer.DialContext(ctx, "tcp", net.JoinHostPort(ip.IP.String(), port))
 		if err == nil {
 			return conn, nil
 		}
