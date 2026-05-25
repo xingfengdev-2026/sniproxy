@@ -13,8 +13,8 @@ RestartSec=2
 LimitNOFILE=1048576
 LimitNPROC=1048576
 TasksMax=infinity
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_KILL CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_KILL CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
 NoNewPrivileges=true
 
 [Install]

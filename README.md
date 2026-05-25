@@ -54,11 +54,13 @@ Non-interactive example:
 ```bash
 SNIPROXY_DOMAIN=dns.example.com \
 SNIPROXY_AUTHORITATIVE_DOMAINS='*' \
-SNIPROXY_CERT_MODE=selfsigned \
+SNIPROXY_CERT_MODE=letsencrypt \
 bash install.sh
 ```
 
 The installer auto-detects public and local IP addresses, writes the server domain into `deny_domains`, writes the server IPs into `deny_target_ips`, fills `tls_server_names` for DoT/DoH, defaults DNS rewrite to `*`, builds the binary, installs the systemd unit, and applies Linux socket tuning.
+
+The default certificate mode is `letsencrypt`, using certbot standalone with the `tls-alpn` challenge on port 443. Your `SNIPROXY_DOMAIN` must resolve to the VPS public IP, and port 443 must be reachable from the internet. Use `SNIPROXY_EMAIL=you@example.com` if you want expiry notices; otherwise the installer registers without an email address.
 
 ## Capacity notes
 

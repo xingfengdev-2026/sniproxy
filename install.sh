@@ -187,14 +187,20 @@ install_certificate() {
       printf '%s|%s' "$SNIPROXY_TLS_CERT_FILE" "$SNIPROXY_TLS_KEY_FILE"
       ;;
     letsencrypt)
-      [ -n "$email" ] || die "email is required for Let's Encrypt"
       if ! command -v certbot >/dev/null 2>&1; then
         log "installing certbot"
         install_packages certbot
       fi
       systemctl stop sniproxy >/dev/null 2>&1 || true
+      local email_args=()
+      if [ -n "$email" ]; then
+        email_args=(--email "$email")
+      else
+        email_args=(--register-unsafely-without-email)
+      fi
       certbot certonly --standalone --non-interactive --agree-tos \
-        --email "$email" -d "$domain"
+        --preferred-challenges "${SNIPROXY_LE_CHALLENGE:-tls-alpn}" \
+        "${email_args[@]}" -d "$domain"
       printf '/etc/letsencrypt/live/%s/fullchain.pem|/etc/letsencrypt/live/%s/privkey.pem' "$domain" "$domain"
       ;;
     selfsigned)
@@ -397,10 +403,10 @@ main() {
   auth_domains="$(prompt_default SNIPROXY_AUTHORITATIVE_DOMAINS "Domains that DNS should rewrite to this server IP, comma-separated" "*")"
 
   local cert_mode
-  cert_mode="$(prompt_default SNIPROXY_CERT_MODE "TLS certificate mode: selfsigned, letsencrypt, existing, none" "selfsigned")"
+  cert_mode="$(prompt_default SNIPROXY_CERT_MODE "TLS certificate mode: letsencrypt, existing, selfsigned, none" "letsencrypt")"
   local email=""
   if [ "$cert_mode" = "letsencrypt" ]; then
-    email="$(prompt_required SNIPROXY_EMAIL "Let's Encrypt email")"
+    email="$(prompt_default SNIPROXY_EMAIL "Let's Encrypt email; leave empty to register without email" "")"
   fi
 
   local port_cleanup
@@ -426,6 +432,13 @@ main() {
 
   write_config "$domain" "$public_ipv4" "$public_ipv6" "$primary_ipv4" "$local_ips" "$cert_file" "$key_file" "$port_cleanup" "$auth_domains"
   tune_kernel
+
+  if [ "$port_cleanup" = "true" ] || [ "$port_cleanup" = "1" ] || [ "$port_cleanup" = "yes" ] || [ "$port_cleanup" = "on" ]; then
+    if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
+      log "stopping systemd-resolved so sniproxy can own :53"
+      systemctl disable --now systemd-resolved >/dev/null 2>&1 || true
+    fi
+  fi
 
   log "starting sniproxy"
   systemctl enable --now sniproxy
