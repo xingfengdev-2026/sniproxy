@@ -366,6 +366,18 @@ EOF
   sysctl -p /etc/sysctl.d/99-sniproxy.conf >/dev/null || true
 }
 
+ensure_fallback_resolver() {
+  if [ ! -e /etc/resolv.conf ]; then
+    printf '%s\n' 'nameserver 1.1.1.1' 'nameserver 8.8.8.8' > /etc/resolv.conf
+    return
+  fi
+  if grep -q '127\.0\.0\.53' /etc/resolv.conf 2>/dev/null; then
+    cp -L /etc/resolv.conf "/etc/resolv.conf.sniproxy.bak.$(date +%s)" 2>/dev/null || true
+    rm -f /etc/resolv.conf
+    printf '%s\n' 'nameserver 1.1.1.1' 'nameserver 8.8.8.8' > /etc/resolv.conf
+  fi
+}
+
 fetch_source() {
   if [ -d "$SRC_DIR/.git" ]; then
     log "updating source in $SRC_DIR"
@@ -441,6 +453,7 @@ main() {
   if [ "$port_cleanup" = "true" ] || [ "$port_cleanup" = "1" ] || [ "$port_cleanup" = "yes" ] || [ "$port_cleanup" = "on" ]; then
     if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
       log "stopping systemd-resolved so sniproxy can own :53"
+      ensure_fallback_resolver
       systemctl disable --now systemd-resolved >/dev/null 2>&1 || true
     fi
   fi
