@@ -84,6 +84,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -93,8 +96,9 @@ jobs:
       - name: Generate checksums
         run: |
           set -euo pipefail
+          cp install.sh dist/install.sh
           cd dist
-          sha256sum *.tar.gz *.zip > sha256sums.txt
+          sha256sum *.tar.gz *.zip install.sh > sha256sums.txt
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -102,5 +106,5 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.zip
+            dist/install.sh
             dist/sha256sums.txt
-

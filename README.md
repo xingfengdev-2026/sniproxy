@@ -46,7 +46,7 @@ DoT and DoH require TLS. If no certificate is configured, the process creates an
 After the repo is published, install directly from GitHub:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/xingfengdev-2026/sniproxy/main/install.sh | bash
+curl -fsSL https://github.com/xingfengdev-2026/sniproxy/releases/latest/download/install.sh | bash
 ```
 
 Non-interactive example:
