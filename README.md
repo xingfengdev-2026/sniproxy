@@ -46,19 +46,16 @@ DoT and DoH require TLS. If no certificate is configured, the process creates an
 After the repo is published, install directly from GitHub:
 
 ```bash
-curl -fsSL https://github.com/xingfengdev-2026/sniproxy/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/xingfengdev-2026/sniproxy/releases/latest/download/install.sh | SNI=dns.example.com bash
 ```
 
 Non-interactive example:
 
 ```bash
-SNIPROXY_DOMAIN=dns.example.com \
-SNIPROXY_AUTHORITATIVE_DOMAINS='*' \
-SNIPROXY_CERT_MODE=letsencrypt \
-bash install.sh
+SNI=dns.example.com bash install.sh
 ```
 
-The installer auto-detects public and local IP addresses, writes the server domain into `deny_domains`, writes the server IPs into `deny_target_ips`, fills `tls_server_names` for DoT/DoH, defaults DNS rewrite to `*`, downloads the prebuilt binary, installs the systemd unit, and applies Linux socket tuning.
+The installer accepts `SNI`, `SNIPROXY_SNI`, or `SNIPROXY_DOMAIN` for the DoT/DoH certificate domain. It auto-detects public and local IP addresses, writes the server domain into `deny_domains`, writes the server IPs into `deny_target_ips`, fills `tls_server_names` for DoT/DoH, defaults DNS rewrite to `*`, defaults startup port cleanup to enabled for `53`, `853`, `80`, `443`, and `8443`, downloads the prebuilt binary, installs the systemd unit, and applies Linux socket tuning.
 
 The installer downloads the prebuilt Linux package from GitHub Releases. Use `SNIPROXY_VERSION=v0.2.0` to pin a version, or leave it unset to use the latest release.
 

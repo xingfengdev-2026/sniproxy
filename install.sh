@@ -36,23 +36,6 @@ have_tty() {
   [ -t 0 ] && [ -t 1 ]
 }
 
-prompt_default() {
-  local var_name="$1"
-  local prompt="$2"
-  local default_value="$3"
-  local value="${!var_name:-}"
-  if [ -n "$value" ]; then
-    printf '%s' "$value"
-    return
-  fi
-  if have_tty; then
-    read -r -p "$prompt [$default_value]: " value
-    printf '%s' "${value:-$default_value}"
-    return
-  fi
-  printf '%s' "$default_value"
-}
-
 prompt_required() {
   local var_name="$1"
   local prompt="$2"
@@ -69,6 +52,17 @@ prompt_required() {
     return
   fi
   die "$var_name is required in non-interactive mode"
+}
+
+resolve_domain() {
+  local value="${SNIPROXY_DOMAIN:-}"
+  [ -n "$value" ] || value="${SNIPROXY_SNI:-}"
+  [ -n "$value" ] || value="${SNI:-}"
+  if [ -n "$value" ]; then
+    printf '%s' "$value"
+    return
+  fi
+  prompt_required SNIPROXY_DOMAIN "SNI/DoT/DoH domain, for example dns.example.com"
 }
 
 install_packages() {
@@ -425,7 +419,7 @@ main() {
   ensure_tools
 
   local domain
-  domain="$(prompt_required SNIPROXY_DOMAIN "DoT/DoH domain, for example dns.example.com")"
+  domain="$(resolve_domain)"
   domain="${domain%.}"
 
   local public_ipv4 public_ipv6 primary_ipv4 local_ips
@@ -435,17 +429,17 @@ main() {
   local_ips="$(detect_local_ips_csv)"
 
   local auth_domains
-  auth_domains="$(prompt_default SNIPROXY_AUTHORITATIVE_DOMAINS "Domains that DNS should rewrite to this server IP, comma-separated" "*")"
+  auth_domains="${SNIPROXY_AUTHORITATIVE_DOMAINS:-*}"
 
   local cert_mode
-  cert_mode="$(prompt_default SNIPROXY_CERT_MODE "TLS certificate mode: letsencrypt, existing, selfsigned, none" "letsencrypt")"
-  local email=""
+  cert_mode="${SNIPROXY_CERT_MODE:-letsencrypt}"
+  local email="${SNIPROXY_EMAIL:-}"
   if [ "$cert_mode" = "letsencrypt" ]; then
-    email="$(prompt_default SNIPROXY_EMAIL "Let's Encrypt email; leave empty to register without email" "")"
+    email="${SNIPROXY_EMAIL:-}"
   fi
 
   local port_cleanup
-  port_cleanup="$(prompt_default SNIPROXY_PORT_CLEANUP "Enable startup port cleanup for 53/853/80/443/8443" "true")"
+  port_cleanup="${SNIPROXY_PORT_CLEANUP:-true}"
 
   log "domain: $domain"
   log "public IPv4: ${public_ipv4:-none}"
