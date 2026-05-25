@@ -110,6 +110,11 @@ ensure_go() {
     log "using existing $(go version)"
     return
   fi
+  if [ -x /usr/local/go/bin/go ]; then
+    export PATH="/usr/local/go/bin:$PATH"
+    log "using existing $(go version)"
+    return
+  fi
   local arch
   arch="$(go_arch)"
   local url="https://go.dev/dl/go${GO_VERSION}.linux-${arch}.tar.gz"
@@ -189,7 +194,7 @@ install_certificate() {
     letsencrypt)
       if ! command -v certbot >/dev/null 2>&1; then
         log "installing certbot"
-        install_packages certbot
+        install_packages certbot >&2
       fi
       systemctl stop sniproxy >/dev/null 2>&1 || true
       local email_args=()
@@ -199,8 +204,8 @@ install_certificate() {
         email_args=(--register-unsafely-without-email)
       fi
       certbot certonly --standalone --non-interactive --agree-tos \
-        --preferred-challenges "${SNIPROXY_LE_CHALLENGE:-tls-alpn}" \
-        "${email_args[@]}" -d "$domain"
+        --preferred-challenges "${SNIPROXY_LE_CHALLENGE:-http}" \
+        "${email_args[@]}" -d "$domain" >&2
       printf '/etc/letsencrypt/live/%s/fullchain.pem|/etc/letsencrypt/live/%s/privkey.pem' "$domain" "$domain"
       ;;
     selfsigned)
