@@ -6,6 +6,16 @@ VERSION="${SNIPROXY_VERSION:-latest}"
 INSTALL_DIR="${SNIPROXY_INSTALL_DIR:-/opt/sniproxy}"
 CONFIG_DIR="${SNIPROXY_CONFIG_DIR:-/etc/sniproxy}"
 SERVICE_FILE="/etc/systemd/system/sniproxy.service"
+TMP_DIRS=()
+
+cleanup_tmp() {
+  local dir
+  for dir in "${TMP_DIRS[@]}"; do
+    [ -n "$dir" ] && rm -rf "$dir"
+  done
+}
+
+trap cleanup_tmp EXIT
 
 log() {
   printf '[sniproxy-install] %s\n' "$*" >&2
@@ -384,7 +394,7 @@ install_release_package() {
   base="$(release_download_base)"
   url="${base}/${asset}"
   tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' RETURN
+  TMP_DIRS+=("$tmp")
 
   log "downloading ${url}"
   curl -fL --retry 3 --retry-delay 2 -o "$tmp/${asset}" "$url"
