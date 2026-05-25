@@ -58,7 +58,9 @@ SNIPROXY_CERT_MODE=letsencrypt \
 bash install.sh
 ```
 
-The installer auto-detects public and local IP addresses, writes the server domain into `deny_domains`, writes the server IPs into `deny_target_ips`, fills `tls_server_names` for DoT/DoH, defaults DNS rewrite to `*`, builds the binary, installs the systemd unit, and applies Linux socket tuning.
+The installer auto-detects public and local IP addresses, writes the server domain into `deny_domains`, writes the server IPs into `deny_target_ips`, fills `tls_server_names` for DoT/DoH, defaults DNS rewrite to `*`, downloads the prebuilt binary, installs the systemd unit, and applies Linux socket tuning.
+
+The installer downloads the prebuilt Linux package from GitHub Releases. Use `SNIPROXY_VERSION=v0.2.0` to pin a version, or leave it unset to use the latest release.
 
 The default certificate mode is `letsencrypt`, using certbot standalone with the HTTP-01 challenge on port 80. Your `SNIPROXY_DOMAIN` must resolve to the VPS public IP, and port 80 must be reachable from the internet. Use `SNIPROXY_EMAIL=you@example.com` if you want expiry notices; otherwise the installer registers without an email address. The installer also adds a certbot deploy hook to restart sniproxy after renewal.
 

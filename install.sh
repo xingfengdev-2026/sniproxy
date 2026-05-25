@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-REPO_URL="${SNIPROXY_REPO_URL:-https://github.com/xingfengdev-2026/sniproxy.git}"
-REF="${SNIPROXY_REF:-main}"
-SRC_DIR="${SNIPROXY_SRC_DIR:-/usr/local/src/sniproxy}"
+GITHUB_REPO="${SNIPROXY_GITHUB_REPO:-xingfengdev-2026/sniproxy}"
+VERSION="${SNIPROXY_VERSION:-latest}"
 INSTALL_DIR="${SNIPROXY_INSTALL_DIR:-/opt/sniproxy}"
 CONFIG_DIR="${SNIPROXY_CONFIG_DIR:-/etc/sniproxy}"
 SERVICE_FILE="/etc/systemd/system/sniproxy.service"
-GO_VERSION="${SNIPROXY_GO_VERSION:-1.25.6}"
 
 log() {
   printf '[sniproxy-install] %s\n' "$*" >&2
@@ -84,47 +82,41 @@ install_packages() {
 
 ensure_tools() {
   local missing=()
-  for tool in curl git tar python3 openssl ip; do
+  for tool in curl tar python3 openssl ip; do
     if ! command -v "$tool" >/dev/null 2>&1; then
       missing+=("$tool")
     fi
   done
   if [ "${#missing[@]}" -gt 0 ]; then
     log "installing required packages: ${missing[*]}"
-    install_packages ca-certificates curl git tar python3 openssl iproute2
+    install_packages ca-certificates curl tar python3 openssl iproute2
   fi
 }
 
-go_arch() {
+package_target() {
+  local os arch
+  case "$(uname -s)" in
+    Linux) os="linux" ;;
+    *) die "installer currently supports Linux systemd hosts only" ;;
+  esac
   case "$(uname -m)" in
-    x86_64|amd64) printf 'amd64' ;;
-    aarch64|arm64) printf 'arm64' ;;
-    armv7l) printf 'armv6l' ;;
-    i386|i686) printf '386' ;;
+    x86_64|amd64) arch="amd64" ;;
+    aarch64|arm64) arch="arm64" ;;
     *) die "unsupported architecture: $(uname -m)" ;;
   esac
+  printf '%s-%s' "$os" "$arch"
 }
 
-ensure_go() {
-  if command -v go >/dev/null 2>&1; then
-    log "using existing $(go version)"
+release_download_base() {
+  if [ -n "${SNIPROXY_DOWNLOAD_BASE:-}" ]; then
+    printf '%s' "$SNIPROXY_DOWNLOAD_BASE"
     return
   fi
-  if [ -x /usr/local/go/bin/go ]; then
-    export PATH="/usr/local/go/bin:$PATH"
-    log "using existing $(go version)"
-    return
+  if [ "$VERSION" = "latest" ]; then
+    printf 'https://github.com/%s/releases/latest/download' "$GITHUB_REPO"
+  else
+    printf 'https://github.com/%s/releases/download/%s' "$GITHUB_REPO" "$VERSION"
   fi
-  local arch
-  arch="$(go_arch)"
-  local url="https://go.dev/dl/go${GO_VERSION}.linux-${arch}.tar.gz"
-  log "installing Go ${GO_VERSION} from ${url}"
-  curl -fsSL "$url" -o /tmp/go.tgz
-  rm -rf /usr/local/go
-  tar -C /usr/local -xzf /tmp/go.tgz
-  rm -f /tmp/go.tgz
-  export PATH="/usr/local/go/bin:$PATH"
-  command -v go >/dev/null 2>&1 || die "go install failed"
 }
 
 detect_public_ipv4() {
@@ -384,27 +376,30 @@ ensure_fallback_resolver() {
   fi
 }
 
-fetch_source() {
-  if [ -d "$SRC_DIR/.git" ]; then
-    log "updating source in $SRC_DIR"
-    git -C "$SRC_DIR" fetch --depth 1 origin "$REF"
-    git -C "$SRC_DIR" checkout -q FETCH_HEAD
-  else
-    log "cloning $REPO_URL to $SRC_DIR"
-    rm -rf "$SRC_DIR"
-    git clone --depth 1 --branch "$REF" "$REPO_URL" "$SRC_DIR"
-  fi
-}
+install_release_package() {
+  local target package asset base url tmp
+  target="$(package_target)"
+  package="sniproxy-${target}"
+  asset="${SNIPROXY_ASSET:-${package}.tar.gz}"
+  base="$(release_download_base)"
+  url="${base}/${asset}"
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
 
-build_install() {
+  log "downloading ${url}"
+  curl -fL --retry 3 --retry-delay 2 -o "$tmp/${asset}" "$url"
+  if command -v sha256sum >/dev/null 2>&1 && curl -fsSL -o "$tmp/sha256sums.txt" "${base}/sha256sums.txt"; then
+    (cd "$tmp" && grep "  ${asset}$" sha256sums.txt | sha256sum -c -)
+  fi
+
+  tar -xzf "$tmp/${asset}" -C "$tmp"
+  [ -x "$tmp/${package}/sniproxy" ] || die "release package missing sniproxy binary"
+  [ -f "$tmp/${package}/deploy/sniproxy.service" ] || die "release package missing systemd service"
+
   mkdir -p "$INSTALL_DIR"
-  log "running tests"
-  (cd "$SRC_DIR" && go test ./...)
-  log "building sniproxy"
-  (cd "$SRC_DIR" && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.buildVersion=${REF}" -o /tmp/sniproxy ./cmd/sniproxy)
   systemctl stop sniproxy >/dev/null 2>&1 || true
-  install -m 755 /tmp/sniproxy "$INSTALL_DIR/sniproxy"
-  install -m 644 "$SRC_DIR/deploy/sniproxy.service" "$SERVICE_FILE"
+  install -m 755 "$tmp/${package}/sniproxy" "$INSTALL_DIR/sniproxy"
+  install -m 644 "$tmp/${package}/deploy/sniproxy.service" "$SERVICE_FILE"
   systemctl daemon-reload
 }
 
@@ -443,9 +438,7 @@ main() {
   log "DNS rewrite domains: ${auth_domains:-none}"
   log "certificate mode: $cert_mode"
 
-  ensure_go
-  fetch_source
-  build_install
+  install_release_package
 
   local cert_pair cert_file key_file
   cert_pair="$(install_certificate "$domain" "$public_ipv4" "$public_ipv6" "$cert_mode" "$email")"
